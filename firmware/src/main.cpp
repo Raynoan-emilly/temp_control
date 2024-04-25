@@ -13,19 +13,23 @@ Authors:
 
 // All the pins can be changed
 //#define PIN_SENSOR 5   /*PIN SENSOR*/
-#define DATA 2
+#define DATA 2 /*Pin Sensor DS1*/
 #define PIN_UP_BUTTON 5  /*Up temperature*/
 #define PIN_DOWN_BUTTON 17 /*Down  temperature*/
 #define PIN_START_STOP 16 /*tEMP CONTROL*/
 #define PIN_SWITCH 14  /*Swich*/
 
+
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
 OneWire oneWire(DATA);
 DallasTemperature ds1 = (&oneWire);
 uint16_t target = 50;
+float precision = 5;
+const uint16_t limit_max_amb = 110;
 const uint16_t limit_max = 100;
 const uint16_t limit_min = 40; 
 bool power_mode = 0;
+float temp_ds1;
 
 static unsigned long last_interrupt_time_up = 0;
 static unsigned long last_interrupt_time_down = 0;
@@ -34,23 +38,27 @@ static unsigned long last_interrupt_time_ss = 0;
 /*------Switch control------*/
 bool Control(){
   float temp_obj = mlx.readObjectTempC();
-  if(temp_obj >= target+5){
+  if(temp_obj >= target+precision){
     return 0;
   }
-  if(temp_obj <= target-5 | temp_obj < target){
+  if(temp_obj <= target-precision){
     return 1;
   }
 
-  Serial.print("ERROR!! Object temperature reading failed");
+  Serial.print("Temperature is OK! Inside of limits parameters");
   return 0;
 }
 
 bool Protection_mode(){
-  float temp_ds1;
   ds1.requestTemperatures();
   temp_ds1 = ds1.getTempCByIndex(0);
 
-  if(temp_ds1>=limit_max){
+  if(temp_ds1 == -127){
+    Serial.print("Error connecting to DS1 sensor. Check wiring.");
+    return 0;
+  }
+
+  if(temp_ds1>=limit_max_amb){
     return 0;
   }
   return 1;

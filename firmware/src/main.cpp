@@ -13,7 +13,7 @@ Authors:
 
 // All the pins can be changed
 //#define PIN_SENSOR 5   /*PIN SENSOR*/
-#define DATA 2 /*Pin Sensor DS1*/
+#define DATA 19 /*Pin Sensor DS1*/
 #define PIN_UP_BUTTON 5  /*Up temperature*/
 #define PIN_DOWN_BUTTON 17 /*Down  temperature*/
 #define PIN_START_STOP 16 /*tEMP CONTROL*/
@@ -29,7 +29,7 @@ const uint16_t limit_max_amb = 110;
 const uint16_t limit_max = 100;
 const uint16_t limit_min = 40; 
 bool power_mode = 0;
-float temp_ds1;
+DeviceAddress add_ds1;
 
 static unsigned long last_interrupt_time_up = 0;
 static unsigned long last_interrupt_time_down = 0;
@@ -38,6 +38,7 @@ static unsigned long last_interrupt_time_ss = 0;
 /*------Switch control------*/
 bool Control(){
   float temp_obj = mlx.readObjectTempC();
+
   if(temp_obj >= target+precision){
     return 0;
   }
@@ -50,8 +51,15 @@ bool Control(){
 }
 
 bool Protection_mode(){
+  float temp_ds1;
+  if (!ds1.getAddress(add_ds1,0)) { // Finds the sensor address on the bus
+    Serial.println("Sensor don't conected!"); 
+  }
+
   ds1.requestTemperatures();
-  temp_ds1 = ds1.getTempCByIndex(0);
+  temp_ds1 = (ds1.getTempC(add_ds1), 0);
+
+  Serial.print(ds1.getTempC(add_ds1), 0);
 
   if(temp_ds1 == -127){
     Serial.print("Error connecting to DS1 sensor. Check wiring.");
@@ -136,6 +144,8 @@ void setup()
 
 void loop()
 {
+  ds1.requestTemperatures();
+
   bool segurity = Protection_mode();
   bool control = Control();
 

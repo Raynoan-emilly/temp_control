@@ -6,191 +6,247 @@ Authors:
 -Raynoan Emilly Silva Batista (raynoan.batista@ee.ufcg.edu.br)
 -Jefferson Lopes (jefferson.lopes@ee.ufcg.edu.br)
  ****************************************************/
+
 #include <Arduino.h>
+
 #include <Adafruit_MLX90614.h>
-#include <OneWire.h>
 #include <DallasTemperature.h>
 #include <LiquidCrystal_I2C.h>
+#include <OneWire.h>
 #include <Wire.h>
 
 // All the pins can be changed
-//#define PIN_SENSOR 5   /*PIN SENSOR*/
-#define DATA 2 /*Pin Sensor DS1*/
-#define PIN_UP_BUTTON 5  /*Up temperature*/
-#define PIN_DOWN_BUTTON 17 /*Down  temperature*/
-#define PIN_START_STOP 16 /*tEMP CONTROL*/
-#define PIN_SWITCH 14  /*Swich*/
-#define LINHAS 2
-#define COLUNAS 16
+#define DEBOUNCE_DELAY 250
+#define PIN_UP_BUTTON 19   /*Up temperature*/
+#define PIN_DOWN_BUTTON 18 /*Down  temperature*/
+#define PIN_START_STOP 5   /*tEMP CONTROL*/
+#define PIN_RELE_RES 4    /*Swich*/
+#define PIN_RELE_PWR 16
+#define LINHAS 4
+#define COLUNAS 20
 #define ADRESS 0X27
-#define DATA 19 /*Pin Sensor DS1*/
+#define PIN_DATA 17 /*Pin Sensor DS1*/
 
 LiquidCrystal_I2C lcd(ADRESS, COLUNAS, LINHAS);
 
 Adafruit_MLX90614 mlx = Adafruit_MLX90614();
-OneWire oneWire(DATA);
+OneWire oneWire(PIN_DATA);
 DallasTemperature ds1 = (&oneWire);
-uint16_t target = 50;
-float precision = 5;
+
 const uint16_t limit_max_amb = 110;
 const uint16_t limit_max = 100;
-const uint16_t limit_min = 40; 
-bool power_mode = 0;
+const uint16_t limit_min = 20;
+
+uint16_t target = 40;
+uint8_t precision = 1;
+
 float temp_ds1;
 float temp_mlx_obj;
-DeviceAddress add_ds1;
+float temp_mlx_amb;
 
-static unsigned long last_interrupt_time_up = 0;
-static unsigned long last_interrupt_time_down = 0;
-static unsigned long last_interrupt_time_ss = 0;
+/**
+ * @brief debounce algorithm for the buttons
+ * 
+ */
+unsigned long last_interrupt_time_up = 0;
+unsigned long last_interrupt_time_down = 0;
+unsigned long last_interrupt_time_ss = 0;
+
+/**
+ * @brief true means that is allowed to turn on the resistance
+ * 
+ */
+bool flag_power = false;
+bool flag_protection = false;
+bool flag_control = false;
 
 /*------Switch control------*/
-bool control_loop(){
-  temp_mlx_obj = mlx.readObjectTempC();
-  if(temp_mlx_obj >= target+precision){
-    return 0;
-  }
-  if(temp_mlx_obj <= target-precision){
-    return 1;
-  }
+void control_loop() {
+    temp_mlx_obj = mlx.readObjectTempC();
 
-  Serial.print("Temperature is OK! Inside of limits parameters");
-  return 0;
-}
-
-bool protection_mode(){
-  ds1.requestTemperatures();
-  temp_ds1 = ds1.getTempCByIndex(0);
-
-  float temp_ds1;
-  if (!ds1.getAddress(add_ds1,0)) { // Finds the sensor address on the bus
-    Serial.println("Sensor don't conected!"); 
-  }
-   temp_ds1 = (ds1.getTempC(add_ds1), 0);
-   Serial.print(ds1.getTempC(add_ds1), 0);
-  if(temp_ds1 == -127){
-    Serial.print("Error connecting to DS1 sensor. Check wiring.");
-    return 0;
-  }
-
-  if(temp_ds1>=limit_max_amb){
-    return 0;
-  }
-  return 1;
-}
-
- void test_led(){
-
-    pinMode(2, OUTPUT);
-    pinMode(15,OUTPUT);
-    digitalWrite(2, HIGH);
-    digitalWrite(15,HIGH);
-    delay(1000);
-    digitalWrite(2,LOW);
-    digitalWrite(15,LOW);
-
-  }
-
-
-void IRAM_ATTR ISR_UP(){
-  unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time_up > 200) 
-  {
-    target++;
-
-    if (target >= limit_max){
-      target = limit_max;
+    if (temp_mlx_obj >= target + precision) {
+        flag_control = false;
     }
-
-    Serial.print("UP, target: ");
-    Serial.println(target);
-  }
-  last_interrupt_time_up = interrupt_time;
+    else if (temp_mlx_obj <= target - precision) {
+        flag_control = true;
+    }
 }
 
-void IRAM_ATTR ISR_DOWN(){
-  unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time_down > 200) 
-  {
-   target--;
-
-    if (target <= limit_min){
-      target = limit_min;
-    }
+void protection_mode() {
+    ds1.requestTemperatures();
+    temp_ds1 = ds1.getTempCByIndex(0);
     
-    Serial.print("DOWN, target: ");
-    Serial.println(target);
-  }
-  
-  last_interrupt_time_down = interrupt_time;
-
-}
-
-void show_temp(){
-  lcd.setCursor(0, 0); 
-  lcd.print(temp_mlx_obj);
-}
-
-void IRAM_ATTR ISR_SS(){
- unsigned long interrupt_time = millis();
-  // If interrupts come faster than 200ms, assume it's a bounce and ignore
-  if (interrupt_time - last_interrupt_time_ss > 200) 
-  {
-    power_mode = !power_mode;
-   
-    if (power_mode) {
-      Serial.println("Start");
+    if (temp_ds1 == -127) {
+        Serial.print("Error connecting to DS1 sensor. Check wiring.");
+        
+        flag_protection = false;
     }
-    else{
-      Serial.println("Stop");
+    else {
+        if (temp_ds1 >= limit_max_amb) {
+            flag_protection = false;
+        }
+        else {
+            flag_protection = true;
+        }
     }
-  }
-  last_interrupt_time_ss = interrupt_time;
 }
-void setup()
-{
-  Serial.begin(115200);
-  ds1.begin();
 
-  pinMode(PIN_SWITCH, OUTPUT);
-  pinMode(PIN_UP_BUTTON, INPUT_PULLUP);
-  pinMode(PIN_DOWN_BUTTON, INPUT_PULLUP);
-  pinMode(PIN_START_STOP,INPUT_PULLUP);
-  attachInterrupt(PIN_UP_BUTTON, ISR_UP, FALLING);
-  attachInterrupt(PIN_START_STOP, ISR_SS, FALLING);
-  attachInterrupt(PIN_DOWN_BUTTON, ISR_DOWN, FALLING);
- 
+void IRAM_ATTR ISR_UP() {
+    unsigned long interrupt_time = millis();
+
+    // If interrupts come faster than 200ms, assume it's a bounce and ignore
+    if (interrupt_time - last_interrupt_time_up > DEBOUNCE_DELAY) {
+        target++;
+
+        if (target >= limit_max) {
+            target = limit_max;
+        }
+
+        Serial.print("UP, target: ");
+        Serial.println(target);
+    }
+
+    last_interrupt_time_up = interrupt_time;
+}
+
+void IRAM_ATTR ISR_DOWN() {
+    unsigned long interrupt_time = millis();
+
+    // If interrupts come faster than 200ms, assume it's a bounce and ignore
+    if (interrupt_time - last_interrupt_time_down > DEBOUNCE_DELAY) {
+        target--;
+
+        if (target <= limit_min) {
+            target = limit_min;
+        }
+
+        Serial.print("DOWN, target: ");
+        Serial.println(target);
+    }
+
+    last_interrupt_time_down = interrupt_time;
+}
+
+void IRAM_ATTR ISR_SS() {
+    unsigned long interrupt_time = millis();
+
+    // If interrupts come faster than 200ms, assume it's a bounce and ignore
+    if (interrupt_time - last_interrupt_time_ss > DEBOUNCE_DELAY) {
+        flag_power = !flag_power;
+
+        if (flag_power) {
+            Serial.println("Start");
+        } else {
+            Serial.println("Stop");
+        }
+    }
+
+    last_interrupt_time_ss = interrupt_time;
+}
+
+void show_temp() {
+    lcd.setCursor(13, 0);
+    lcd.print(temp_mlx_obj);
+
+    lcd.setCursor(8, 1);
+    lcd.print(target);
+
+    Serial.print("obejct temp: ");
+    Serial.println(temp_mlx_obj);
+
+    lcd.setCursor(0, 2);
+    if (flag_power && flag_protection && flag_control) {
+        lcd.print("Heating!");
+    }
+    else {
+        lcd.print("        ");
+    }
+
+    lcd.setCursor(13, 1);
+    lcd.print(temp_ds1);
+
+    lcd.setCursor(0, 3);
+    if (flag_power) {
+        lcd.print("Powered ON ");
+    }
+    else {
+        lcd.print("Powered OFF");
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+
+    pinMode(PIN_RELE_RES, OUTPUT);
+    pinMode(PIN_RELE_PWR, OUTPUT);
+    pinMode(PIN_UP_BUTTON, INPUT_PULLUP);
+    pinMode(PIN_DOWN_BUTTON, INPUT_PULLUP);
+    pinMode(PIN_START_STOP, INPUT_PULLUP);
+
+    digitalWrite(PIN_RELE_PWR, HIGH);
+    digitalWrite(PIN_RELE_RES, HIGH);
+
+    attachInterrupt(PIN_UP_BUTTON, ISR_UP, FALLING);
+    attachInterrupt(PIN_START_STOP, ISR_SS, FALLING);
+    attachInterrupt(PIN_DOWN_BUTTON, ISR_DOWN, FALLING);
+
+    /* init display LCD */
+    lcd.init();
+    lcd.backlight();
+    lcd.clear();
+
+    /* init MLX sensor and check if it's connected */
     if (!mlx.begin()) {
-      Serial.println("Error connecting to MLX sensor. Check wiring.");
-      while (1);
-    };
+        Serial.println("Error connecting to MLX sensor. Check wiring.");
+        
+        lcd.setCursor(0, 0);
+        lcd.print("ERROR: 0x01");
+
+        /* lock processor */
+        while (true) {
+            ;
+        }
+    }
+
+    /* init DS18B20 sensor and check if it's working */
+    ds1.begin();
+    ds1.requestTemperatures();
+    temp_ds1 = ds1.getTempCByIndex(0);
+    if (temp_ds1 == -127) {
+        Serial.println("Error connecting to DS1 sensor. Check wiring.");
+        
+        lcd.setCursor(0, 0);
+        lcd.print("ERROR: 0x02");
+
+        /* lock processor */
+        while (true) {
+            ;
+        }
+    }
+
+    lcd.setCursor(0, 0);
+    lcd.print("Temp object: ");
     
-    test_led();
-
-    lcd.init(); 
-    lcd.backlight(); 
-    lcd.clear(); 
-
+    lcd.setCursor(0, 1);
+    lcd.print("Target: ");
 }
 
-void loop()
-{
-  control_loop();
-  show_temp();
-  bool segurity = protection_mode();
-  bool control = control_loop();
-  ds1.requestTemperatures();
+void loop() {
+    protection_mode();
+    control_loop();
 
-  digitalWrite(PIN_SWITCH,power_mode && segurity && control);
+    show_temp();
 
-  /*-------Debug-------*/
-  Serial.print("Ambient = "); Serial.print(mlx.readAmbientTempC());
-  Serial.print("*C\tObject = "); Serial.print(mlx.readObjectTempC()); Serial.println("*C");
-  Serial.print("Ambient = "); Serial.print(mlx.readAmbientTempF());
-  Serial.print("*F\tObject = "); Serial.print(mlx.readObjectTempF()); Serial.println("*F");
+    /* correct for low level active of the relay */
+    digitalWrite(PIN_RELE_RES, !(flag_power && flag_protection && flag_control));
+    digitalWrite(PIN_RELE_PWR, !flag_power);
 
-  Serial.println();
-  delay(500);
+    Serial.print("f_pwr: ");
+    Serial.print(flag_power);
+    Serial.print(" , f_pro: ");
+    Serial.print(flag_protection);
+    Serial.print(", f_con: ");
+    Serial.println(flag_control);
+
+    delay(250);
 }
